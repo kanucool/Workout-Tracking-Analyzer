@@ -2,3 +2,5 @@ fastapi
 uvicorn
 pydantic
 pdf4llm
+google-genai
+json

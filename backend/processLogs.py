@@ -1,5 +1,87 @@
-import pdf4llm, tempfile, os
+import pdf4llm, tempfile, os, json, time
 from fastapi import UploadFile, HTTPException
+from google import genai
+from google.genai import types
+
+import models
+
+GEMINI_KEY = os.environ.get("GEMINI_KEY")
+BASE_PROMPT = """
+Given the following workout log data, return a JSON array of the following format:
+{
+    "workouts": [
+        {
+            "date": "YYYY-MM-DD",
+            "exercises": [
+                {"name": str,
+                "sets": [{"reps": int, "weight": float, "unit": str (ex lb or kg)}]
+            ],
+            "notes": [strings of any notes that may appear. can be empty.]
+        }
+    ]
+}
+
+Example input:
+10/29/2023: (Overall good workout)
+Leg press: 3x12 170lb
+
+11/05/2023:
+Leg press: 1x12 180lb, 2x10 185lb (Form needs improvement)
+
+Example Output for above:
+{
+    "workouts": [
+        {
+            "date": "2023-10-29",
+            "exercises": [
+                {
+                "name": "Leg press",
+                "sets": [
+                            {"reps": 12, "weight": 170, "unit": "lb"},
+                            {"reps": 12, "weight": 170, "unit": "lb"},
+                            {"reps": 12, "weight": 170, "unit": "lb"}
+                        ]
+                }
+            ],
+            "notes": ["Overall good workout"]
+        },
+        {
+            "date": "2023-11-05",
+            "exercises": [
+                {
+                "name": "Leg press",
+                "sets": [
+                            {"reps": 12, "weight": 180, "unit": "lb"},
+                            {"reps": 10, "weight": 185, "unit": "lb"},
+                            {"reps": 10, "weight": 185, "unit": "lb"}
+                        ]
+                }
+            ],
+            "notes": ["Leg press: Form needs improvement"]
+        }
+    ]
+}
+
+If some data is missing, extrapolate and make assumptions to fill in the blanks.
+Now answer for the following workout log data:
+"""
+
+CLIENT = genai.Client(api_key=GEMINI_KEY)
+
+
+def parse_workout_log(workout_log_text: str) -> models.WorkoutLog:
+    start = time.time()
+    response = CLIENT.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=f"{BASE_PROMPT}\n{workout_log_text}",
+        config=types.GenerateContentConfig(
+            response_mime_type='application/json',
+            response_schema=models.WorkoutLog,
+        ),
+    )
+    print(f"query took {time.time() - start} seconds to run")
+    assert response and response.text
+    return models.WorkoutLog.model_validate(json.loads(response.text))
 
 
 async def extract_text_from_file(workout_log_file: UploadFile, filename: str) -> str:
@@ -32,5 +114,17 @@ async def extract_text_from_file(workout_log_file: UploadFile, filename: str) ->
     return file_content
 
 
-def parse_workout_log(workout_log_text: str) -> str:
-    return ""
+def main():
+    print(parse_workout_log(
+        """
+        5/10/2025: (Forearms fatigued)
+        Bench Press: 3x8 170lb
+        Tricep Pushdown: 3x10 50lb
+
+        5/15/2025:
+        Bench Press: 1x12 180lb, 2x10 185lb
+        Tricep Pushdown: 3x11 50lb
+        """).model_dump_json(indent=2))
+
+if __name__ == "__main__":
+    main()
