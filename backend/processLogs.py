@@ -63,6 +63,10 @@ Example Output for above:
 }
 
 If some data is missing, extrapolate and make assumptions to fill in the blanks.
+If the number of sets for an exercise is unusually high (think 50+ sets for one
+exercise in a single workout), exclude it from the output.
+If a note appears next to an exercise name, exclude it from the name of the exercise,
+and include it in the notes section instead.
 Now answer for the following workout log data:
 """
 
@@ -72,7 +76,7 @@ CLIENT = genai.Client(api_key=GEMINI_KEY)
 def parse_workout_log(workout_log_text: str) -> models.WorkoutLog:
     start = time.time()
     response = CLIENT.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-2.5-flash-lite',
         contents=f"{BASE_PROMPT}\n{workout_log_text}",
         config=types.GenerateContentConfig(
             response_mime_type='application/json',
@@ -82,6 +86,11 @@ def parse_workout_log(workout_log_text: str) -> models.WorkoutLog:
     print(f"query took {time.time() - start} seconds to run")
     assert response and response.text
     return models.WorkoutLog.model_validate(json.loads(response.text))
+
+
+def extract_text_from_pdf(filename: str) -> str:
+    assert filename.endswith(".pdf")
+    return pdf4llm.to_markdown(doc=filename, ignore_images=True)
 
 
 async def extract_text_from_file(workout_log_file: UploadFile, filename: str) -> str:
@@ -115,16 +124,13 @@ async def extract_text_from_file(workout_log_file: UploadFile, filename: str) ->
 
 
 def main():
-    print(parse_workout_log(
-        """
-        5/10/2025: (Forearms fatigued)
-        Bench Press: 3x8 170lb
-        Tricep Pushdown: 3x10 50lb
+    json_data = parse_workout_log(extract_text_from_pdf(
+                    "tests/LEG & SHOULDERS Tracking.pdf"
+                    )).model_dump_json(indent=2)
+    
+    with open("tests/exampleLog.json", "w") as fp:
+        fp.write(json_data)
 
-        5/15/2025:
-        Bench Press: 1x12 180lb, 2x10 185lb
-        Tricep Pushdown: 3x11 50lb
-        """).model_dump_json(indent=2))
 
 if __name__ == "__main__":
     main()

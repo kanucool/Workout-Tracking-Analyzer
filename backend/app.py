@@ -1,5 +1,4 @@
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
-
 from processLogs import extract_text_from_file, parse_workout_log
 
 app = FastAPI()
@@ -24,7 +23,7 @@ async def upload_workout_log(
                                         filename=filename,)
                                     )
         elif workout_log_text:
-            return parse_workout_log(workout_log_text=workout_log_text)
+            return parse_workout_log(workout_log_text=workout_log_text).model_dump()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Parsing workout log failed: {e}")
     
