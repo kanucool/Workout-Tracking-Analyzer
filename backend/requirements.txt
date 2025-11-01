@@ -3,4 +3,5 @@ uvicorn
 pydantic
 pdf4llm
 google-genai
-json
+firebase_admin
+google-cloud-firestore

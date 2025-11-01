@@ -1,7 +1,9 @@
 import pdf4llm, tempfile, os, json, time
-from fastapi import UploadFile, HTTPException
+from fastapi import UploadFile, HTTPException, File, Form
 from google import genai
 from google.genai import types
+from typing import Any
+import asyncio
 
 import models
 
@@ -73,7 +75,7 @@ Now answer for the following workout log data:
 CLIENT = genai.Client(api_key=GEMINI_KEY)
 
 
-def parse_workout_log(workout_log_text: str) -> models.WorkoutLog:
+async def parse_workout_log(workout_log_text: str) -> models.WorkoutLog:
     start = time.time()
     response = CLIENT.models.generate_content(
         model='gemini-2.5-flash-lite',
@@ -88,7 +90,7 @@ def parse_workout_log(workout_log_text: str) -> models.WorkoutLog:
     return models.WorkoutLog.model_validate(json.loads(response.text))
 
 
-def extract_text_from_pdf(filename: str) -> str:
+async def extract_text_from_pdf(filename: str) -> str:
     assert filename.endswith(".pdf")
     return pdf4llm.to_markdown(doc=filename, ignore_images=True)
 
@@ -123,14 +125,41 @@ async def extract_text_from_file(workout_log_file: UploadFile, filename: str) ->
     return file_content
 
 
-def main():
-    json_data = parse_workout_log(extract_text_from_pdf(
+async def raw_log_to_json(workout_log_file: UploadFile = File(None),
+                    workout_log_text: str = Form(None)) -> models.WorkoutLog:
+    try:
+        if workout_log_file and workout_log_text:
+            raise HTTPException(status_code=400, detail="Input either a file or text, not both.")
+        
+        if workout_log_file:
+            filename = (workout_log_file.filename or "invalid").lower()
+            return await parse_workout_log(await extract_text_from_file(
+                                        workout_log_file=workout_log_file,
+                                        filename=filename,)
+                                    )
+        elif workout_log_text:
+            return parse_workout_log(workout_log_text=workout_log_text).model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Parsing workout log failed: {e}")
+    
+    raise HTTPException(status_code=400, detail="Neither a file or raw text was provided.")
+
+
+async def save_logs(user_info: dict[str, Any], workout_log: models.WorkoutLog) -> dict[str, Any]:
+    """
+    @TODO: Save the workout log to FireStore using the user_info dict 
+    """
+    return {}
+
+
+async def main():
+    json_data = (await parse_workout_log(await extract_text_from_pdf(
                     "tests/LEG & SHOULDERS Tracking.pdf"
-                    )).model_dump_json(indent=2)
+                    ))).model_dump_json(indent=2)
     
     with open("tests/exampleLog.json", "w") as fp:
         fp.write(json_data)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
