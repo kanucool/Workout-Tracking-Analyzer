@@ -6,72 +6,10 @@ from typing import Any
 import asyncio
 
 import models
+from firestore.firestore import Firestore
+from constants.constants import BASE_PROMPT
 
 GEMINI_KEY = os.environ.get("GEMINI_KEY")
-BASE_PROMPT = """
-Given the following workout log data, return a JSON array of the following format:
-{
-    "workouts": [
-        {
-            "date": "YYYY-MM-DD",
-            "exercises": [
-                {"name": str,
-                "sets": [{"reps": int, "weight": float, "unit": str (ex lb or kg)}]
-            ],
-            "notes": [strings of any notes that may appear. can be empty.]
-        }
-    ]
-}
-
-Example input:
-10/29/2023: (Overall good workout)
-Leg press: 3x12 170lb
-
-11/05/2023:
-Leg press: 1x12 180lb, 2x10 185lb (Form needs improvement)
-
-Example Output for above:
-{
-    "workouts": [
-        {
-            "date": "2023-10-29",
-            "exercises": [
-                {
-                "name": "Leg press",
-                "sets": [
-                            {"reps": 12, "weight": 170, "unit": "lb"},
-                            {"reps": 12, "weight": 170, "unit": "lb"},
-                            {"reps": 12, "weight": 170, "unit": "lb"}
-                        ]
-                }
-            ],
-            "notes": ["Overall good workout"]
-        },
-        {
-            "date": "2023-11-05",
-            "exercises": [
-                {
-                "name": "Leg press",
-                "sets": [
-                            {"reps": 12, "weight": 180, "unit": "lb"},
-                            {"reps": 10, "weight": 185, "unit": "lb"},
-                            {"reps": 10, "weight": 185, "unit": "lb"}
-                        ]
-                }
-            ],
-            "notes": ["Leg press: Form needs improvement"]
-        }
-    ]
-}
-
-If some data is missing, extrapolate and make assumptions to fill in the blanks.
-If the number of sets for an exercise is unusually high (think 50+ sets for one
-exercise in a single workout), exclude it from the output.
-If a note appears next to an exercise name, exclude it from the name of the exercise,
-and include it in the notes section instead.
-Now answer for the following workout log data:
-"""
-
 CLIENT = genai.Client(api_key=GEMINI_KEY)
 
 
@@ -106,12 +44,8 @@ async def extract_text_from_file(workout_log_file: UploadFile, filename: str) ->
         except Exception as e:
             raise
         finally:
-            try:
-                if pdf and os.path.exists(pdf.name):
-                    os.unlink(pdf.name)
-            except OSError as e:
-                with open("logging/garbage_files.txt", "a") as fp:
-                    fp.write(f"{pdf.name if pdf else "DNE"}: {e}\n")
+            if pdf and os.path.exists(pdf.name):
+                os.unlink(pdf.name)
 
     elif filename.endswith(".txt"):
         file_bytes = await workout_log_file.read()
@@ -145,11 +79,14 @@ async def raw_log_to_json(workout_log_file: UploadFile = File(None),
     raise HTTPException(status_code=400, detail="Neither a file or raw text was provided.")
 
 
-async def save_logs(user_info: dict[str, Any], workout_log: models.WorkoutLog) -> dict[str, Any]:
-    """
-    @TODO: Save the workout log to FireStore using the user_info dict 
-    """
-    return {}
+async def save_logs(uid: str,
+                    workout_log: models.WorkoutLog,
+                    db: Firestore) -> str:
+    try:
+        db.save_workout_log(uid, workout_log)
+        return "OK"
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Saving workout log failed: {e}")
 
 
 async def main():
