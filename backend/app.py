@@ -1,13 +1,21 @@
 import firebase_admin, os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Depends
+from fastapi import FastAPI, File, Form, UploadFile, Depends
 from firebase_admin import credentials, firestore
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 from typing import Any
+import asyncio
 
 from auth import get_user_from_credentials
-from processLogs import raw_log_to_json, save_logs
+from processLogs import LogProcessor
+from firestore.firestore import FirestoreConnector
+import constants.constants as constants
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.abspath(os.path.join(current_dir, '..'))
+dotenv_path = os.path.join(root_dir, '.env')
+load_dotenv(dotenv_path)
 
 origins = [
     "http://localhost:5173",
@@ -25,7 +33,8 @@ async def lifespan(app):
         cred = credentials.Certificate(os.environ.get("FIRESTORE_KEY_PATH"))
         firebase_admin.initialize_app(cred)
 
-    app.state.db = firestore.client()
+    app.state.db = FirestoreConnector(db=firestore.client())
+    app.state.sem = asyncio.Semaphore(constants.THREAD_LIMIT)
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -47,8 +56,9 @@ async def upload_workout_log(
     Workout logs can be passed in as either a file or as raw text.
     Utilize an LLM to parse the workout logs into JSON.
     """
-    workout_logs = await raw_log_to_json(workout_log_file, workout_log_text)
-    return await save_logs(user_info["uid"], workout_logs, app.state.db)
+    processor = LogProcessor(db=app.state.db, sem=app.state.sem)
+    workout_logs = await processor.parse_raw_data(workout_log_file, workout_log_text)
+    return await processor.save_logs(user_info["uid"], workout_logs)
     
 
 @app.get("/auth/me")

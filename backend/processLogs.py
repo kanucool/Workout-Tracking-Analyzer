@@ -1,102 +1,135 @@
-import pdf4llm, tempfile, os, json, time
+import io, os, json, time
+from pypdf import PdfReader
 from fastapi import UploadFile, HTTPException, File, Form
 from google import genai
 from google.genai import types
-from typing import Any
+from typing import Optional, Callable
+from itertools import zip_longest
 import asyncio
 
 import models
-from firestore.firestore import Firestore
-from constants.constants import BASE_PROMPT
+from firestore.firestore import FirestoreConnector
+import constants.constants as constants
 
 GEMINI_KEY = os.environ.get("GEMINI_KEY")
 CLIENT = genai.Client(api_key=GEMINI_KEY)
 
+class LogProcessor:
+    def __init__(self, db: FirestoreConnector, sem: asyncio.Semaphore):
+        self.db = db
+        self.sem = sem
 
-async def parse_workout_log(workout_log_text: str) -> models.WorkoutLog:
-    start = time.time()
-    response = CLIENT.models.generate_content(
-        model='gemini-2.5-flash-lite',
-        contents=f"{BASE_PROMPT}\n{workout_log_text}",
-        config=types.GenerateContentConfig(
-            response_mime_type='application/json',
-            response_schema=models.WorkoutLog,
-        ),
-    )
-    print(f"query took {time.time() - start} seconds to run")
-    assert response and response.text
-    return models.WorkoutLog.model_validate(json.loads(response.text))
-
-
-async def extract_text_from_pdf(filename: str) -> str:
-    assert filename.endswith(".pdf")
-    return pdf4llm.to_markdown(doc=filename, ignore_images=True)
-
-
-async def extract_text_from_file(workout_log_file: UploadFile, filename: str) -> str:
-    if filename.endswith(".pdf"):
-        pdf = None
+    def parse_workout_chunk(self, workouts: list[str]) -> Optional[models.WorkoutLog]:
         try:
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as pdf:
-                pdf.write(await workout_log_file.read())
+            response = CLIENT.models.generate_content(
+                model='gemini-2.5-flash-lite',
+                contents=f"{constants.WORKOUT_LOG_TO_STANDARDIZED_FORMAT_PROMPT}\n{'\n'.join(workouts)}",
+                config=types.GenerateContentConfig(
+                    response_mime_type='application/json',
+                    response_schema=models.WorkoutLog,
+                ),
+            )
+            assert response and response.text
+            return models.WorkoutLog.model_validate(json.loads(response.text))
 
-            file_content = pdf4llm.to_markdown(doc=pdf.name, ignore_images=True)
         except Exception as e:
-            raise
-        finally:
-            if pdf and os.path.exists(pdf.name):
-                os.unlink(pdf.name)
+            print(f"Parsing workouts chunk failed: {e}")
+            return None
 
-    elif filename.endswith(".txt"):
-        file_bytes = await workout_log_file.read()
-        try:
-            file_content = file_bytes.decode(encoding="utf-8")
-        except UnicodeDecodeError:
-            file_content = file_bytes.decode(encoding="latin-1")
-    else:
-        raise HTTPException(status_code=400, detail="The file must be a txt or a pdf.")
+    async def make_thread(self, target_func: Callable, **kwargs):
+        async with self.sem:
+            return await asyncio.to_thread(
+                target_func, **kwargs
+            )
 
-    return file_content
+    async def parse_workout_log(self, workout_log_text: str) -> models.WorkoutLog:
+        start = time.time()
+        response = await self.make_thread(
+            CLIENT.models.generate_content,
+            model='gemini-2.5-flash-lite',
+            contents=f"{constants.SPLIT_BY_DATE_PROMPT}\n{workout_log_text}",
+            config=types.GenerateContentConfig(
+                response_mime_type='application/json',
+                response_schema=models.WorkoutLogRawText
+            )
+        )
+        print(f"Workout log splitter query ran in {time.time() - start} seconds")
 
+        start = time.time()
 
-async def raw_log_to_json(workout_log_file: UploadFile = File(None),
-                    workout_log_text: str = Form(None)) -> models.WorkoutLog:
-    try:
-        if workout_log_file and workout_log_text:
-            raise HTTPException(status_code=400, detail="Input either a file or text, not both.")
+        assert response and response.text
+        workouts = models.WorkoutLogRawText.model_validate(json.loads(response.text))
         
-        if workout_log_file:
-            filename = (workout_log_file.filename or "invalid").lower()
-            return await parse_workout_log(await extract_text_from_file(
-                                        workout_log_file=workout_log_file,
-                                        filename=filename,)
+        parsing_tasks = [self.make_thread(self.parse_workout_chunk, workouts=list(chunk))
+                        for chunk in zip_longest(
+                            *(iter(workouts.workouts),) * constants.CHUNK_SIZE, fillvalue=''
+                            )
+                        ]
+        
+        parsed_chunks = filter(lambda workout_log: isinstance(workout_log, models.WorkoutLog),
+                                await asyncio.gather(*parsing_tasks),)
+        
+        parsed_workouts = models.WorkoutLog(workouts=[])
+        for workout_log_chunk in parsed_chunks:
+            assert isinstance(workout_log_chunk, models.WorkoutLog)
+            parsed_workouts.workouts.extend(workout_log_chunk.workouts)
+        
+        print(f"Time to parse all workouts via multithreading is {time.time() - start}")
+
+        return parsed_workouts
+
+
+    async def extract_text_from_file(self, workout_log_file: UploadFile, filename: str,) -> str:
+        if filename.endswith(".pdf"):
+            pdf_bytes = await workout_log_file.read()
+            pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
+            file_content = '\n'.join(filter(lambda page: page,
+                                        (
+                                            page.extract_text()
+                                            for page
+                                            in pdf_reader.pages
+                                        )
                                     )
-        elif workout_log_text:
-            return parse_workout_log(workout_log_text=workout_log_text).model_dump()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Parsing workout log failed: {e}")
+                                )
+        elif filename.endswith(".txt"):
+            file_bytes = await workout_log_file.read()
+            try:
+                file_content = file_bytes.decode(encoding="utf-8")
+            except UnicodeDecodeError:
+                file_content = file_bytes.decode(encoding="latin-1")
+        else:
+            raise HTTPException(status_code=400, detail="The file must be a txt or a pdf.")
+
+        return file_content
+
+
+    async def parse_raw_data(self, workout_log_file: UploadFile = File(None),
+                            workout_log_text: str = Form(None),) -> models.WorkoutLog:
+        try:
+            if workout_log_file and workout_log_text:
+                raise HTTPException(status_code=400, detail="Input either a file or text, not both.")
+            
+            if workout_log_file:
+                filename = (workout_log_file.filename or "invalid").lower()
+                return await self.parse_workout_log(await self.extract_text_from_file(
+                                            workout_log_file=workout_log_file,
+                                            filename=filename,),
+                                        )
+            elif workout_log_text:
+                return await self.parse_workout_log(workout_log_text=workout_log_text)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Parsing workout log failed: {e}")
+        
+        raise HTTPException(status_code=400, detail="Neither a file or raw text was provided.")
+
+
+    async def save_logs(self,
+                        uid: str,
+                        workout_log: models.WorkoutLog,
+                        ) -> str:
+        try:
+            await self.make_thread(self.db.save_workout_log, uid=uid, workout_log=workout_log)
+            return "OK"
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Saving workout log failed: {e}")
     
-    raise HTTPException(status_code=400, detail="Neither a file or raw text was provided.")
-
-
-async def save_logs(uid: str,
-                    workout_log: models.WorkoutLog,
-                    db: Firestore) -> str:
-    try:
-        db.save_workout_log(uid, workout_log)
-        return "OK"
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Saving workout log failed: {e}")
-
-
-async def main():
-    json_data = (await parse_workout_log(await extract_text_from_pdf(
-                    "tests/LEG & SHOULDERS Tracking.pdf"
-                    ))).model_dump_json(indent=2)
-    
-    with open("tests/exampleLog.json", "w") as fp:
-        fp.write(json_data)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

@@ -1,5 +1,8 @@
 from pydantic import BaseModel
 
+class WorkoutLogRawText(BaseModel):
+    workouts: list[str]
+
 class Sets(BaseModel):
     reps: int
     weight: float

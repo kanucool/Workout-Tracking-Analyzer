@@ -2,7 +2,7 @@ from google.cloud.firestore import Client as FirestoreClient
 
 import models
 
-class Firestore:
+class FirestoreConnector:
     def __init__(self, db: FirestoreClient):
         self.db = db
 
