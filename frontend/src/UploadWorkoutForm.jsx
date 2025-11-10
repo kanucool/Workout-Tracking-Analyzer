@@ -1,8 +1,11 @@
 import { useState } from 'react';
 
-export default function UploadWorkoutForm({ userInfo, setLoading }) {
+import LoadingOverlay from './components/LoadingOverlay.jsx';
+
+export default function UploadWorkoutForm({ userInfo }) {
     const [fileList, setFileList] = useState([]);
     const [uploadRes, setUploadRes] = useState([]);
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
     const fileListChange = (e) => {
@@ -62,7 +65,8 @@ export default function UploadWorkoutForm({ userInfo, setLoading }) {
     }
 
     return (
-        <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-8">
+        <div className="relative bg-white rounded-lg shadow-xl p-8">
+            <LoadingOverlay loading={loading}/>
             <form className="space-y-4" onSubmit={uploadFileList}>
                 <h2 className="text-2xl font-bold text-center text-gray-800">
                     Upload Workouts
@@ -100,7 +104,10 @@ export default function UploadWorkoutForm({ userInfo, setLoading }) {
                     <div className="text-sm text-gray-600">
                         <ul className="list-disc list-inside">
                                 {uploadRes.map((res, index) => (
-                                    <li key={`upload-res-${index}`}>{res}</li>
+                                    <li key={`upload-res-${index}`}
+                                        className={res.split(": ").pop() == "Uploaded"
+                                                ? "text-green-500" : "text-red-600"}
+                                    >{res}</li>
                                 ))}
                             </ul>
                     </div>

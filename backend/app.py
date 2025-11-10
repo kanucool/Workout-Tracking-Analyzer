@@ -1,10 +1,11 @@
 import firebase_admin, os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, Form, UploadFile, Depends
+from fastapi import FastAPI, File, Form, UploadFile, Depends, HTTPException
 from firebase_admin import credentials, firestore
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from typing import Any
+from collections import deque
 import asyncio
 
 from auth import get_user_from_credentials
@@ -35,6 +36,7 @@ async def lifespan(app):
 
     app.state.db = FirestoreConnector(db=firestore.client())
     app.state.sem = asyncio.Semaphore(constants.THREAD_LIMIT)
+    app.state.reqs = deque()
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -56,7 +58,7 @@ async def upload_workout_log(
     Workout logs can be passed in as either a file or as raw text.
     Utilize an LLM to parse the workout logs into JSON.
     """
-    processor = LogProcessor(db=app.state.db, sem=app.state.sem)
+    processor = LogProcessor(db=app.state.db, sem=app.state.sem, reqs=app.state.reqs)
     workout_logs = await processor.parse_raw_data(workout_log_file, workout_log_text)
     return await processor.save_logs(user_info["uid"], workout_logs)
     

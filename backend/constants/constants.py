@@ -2,6 +2,8 @@ CHUNK_SIZE = 15
 
 THREAD_LIMIT = 10
 
+RATE_LIMIT = 15
+
 SPLIT_BY_DATE_PROMPT = """
 You are a text splitter. Your only job is to find all sections of this text that represent
 a single workout day. A workout day starts with a date. Return a JSON list of strings, 

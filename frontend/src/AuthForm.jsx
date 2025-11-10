@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import {login, createAccount } from './firebase.js'
+import LoadingOverlay from './components/LoadingOverlay.jsx';
 
-export default function AuthForm({ loading, setLoading, error, setError }) {
+export default function AuthForm() {
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
 
@@ -28,7 +31,8 @@ export default function AuthForm({ loading, setLoading, error, setError }) {
     }
 
     return (
-        <div className="w-full max-w-md bg-white rounded-lg shadow-xl p-8">
+        <div className="relative w-full max-w-lg bg-white rounded-lg shadow-xl p-8">
+            <LoadingOverlay loading={loading}/>
             <form className="space-y-4" onSubmit={signIn}>
                 <h2 className="text-2xl font-bold text-center text-gray-800">
                     Workout Analyzer Login

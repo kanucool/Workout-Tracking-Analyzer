@@ -5,7 +5,10 @@ from google import genai
 from google.genai import types
 from typing import Optional, Callable
 from itertools import zip_longest
+from collections import deque
 import asyncio
+from threading import Lock
+import time
 
 import models
 from firestore.firestore import FirestoreConnector
@@ -15,20 +18,36 @@ GEMINI_KEY = os.environ.get("GEMINI_KEY")
 CLIENT = genai.Client(api_key=GEMINI_KEY)
 
 class LogProcessor:
-    def __init__(self, db: FirestoreConnector, sem: asyncio.Semaphore):
+    def __init__(self, db: FirestoreConnector, sem: asyncio.Semaphore, reqs: deque):
         self.db = db
         self.sem = sem
+        self.reqs = reqs
+        self.req_lock = Lock()
+    
+    def request_gemini(self, **kwargs):
+        while True:
+            with self.req_lock:
+                curr_time = time.time()
+                while self.reqs and self.reqs[0] < curr_time - 60:
+                    self.reqs.popleft()
+                
+                if len(self.reqs) < constants.RATE_LIMIT:
+                    self.reqs.append(curr_time)
+                    break
+            time.sleep(1)
+
+        return CLIENT.models.generate_content(
+                **kwargs,
+            )
 
     def parse_workout_chunk(self, workouts: list[str]) -> Optional[models.WorkoutLog]:
         try:
-            response = CLIENT.models.generate_content(
-                model='gemini-2.5-flash-lite',
+            response = self.request_gemini(model='gemini-2.5-flash-lite',
                 contents=f"{constants.WORKOUT_LOG_TO_STANDARDIZED_FORMAT_PROMPT}\n{'\n'.join(workouts)}",
                 config=types.GenerateContentConfig(
                     response_mime_type='application/json',
                     response_schema=models.WorkoutLog,
-                ),
-            )
+                ),)
             assert response and response.text
             return models.WorkoutLog.model_validate(json.loads(response.text))
 
@@ -45,7 +64,7 @@ class LogProcessor:
     async def parse_workout_log(self, workout_log_text: str) -> models.WorkoutLog:
         start = time.time()
         response = await self.make_thread(
-            CLIENT.models.generate_content,
+            self.request_gemini,
             model='gemini-2.5-flash-lite',
             contents=f"{constants.SPLIT_BY_DATE_PROMPT}\n{workout_log_text}",
             config=types.GenerateContentConfig(
