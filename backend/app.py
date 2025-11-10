@@ -48,6 +48,12 @@ app.add_middleware(CORSMiddleware,
                    allow_headers=["*"],
                 )
 
+@app.get("/workouts")
+async def get_workouts(user_info: dict[str, Any] = Depends(get_user_from_credentials)):
+    processor = LogProcessor(db=app.state.db, sem=app.state.sem, reqs=app.state.reqs)
+    return await processor.make_thread(app.state.db.get_workouts, uid=user_info["uid"])
+
+
 @app.post("/parse/upload")
 async def upload_workout_log(
     user_info: dict[str, Any] = Depends(get_user_from_credentials),
@@ -59,7 +65,10 @@ async def upload_workout_log(
     Utilize an LLM to parse the workout logs into JSON.
     """
     processor = LogProcessor(db=app.state.db, sem=app.state.sem, reqs=app.state.reqs)
-    workout_logs = await processor.parse_raw_data(workout_log_file, workout_log_text)
+    workout_logs = await processor.parse_raw_data(
+        workout_log_file=workout_log_file,
+        workout_log_text=workout_log_text
+    )
     return await processor.save_logs(user_info["uid"], workout_logs)
     
 

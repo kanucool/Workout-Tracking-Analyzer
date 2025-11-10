@@ -28,7 +28,7 @@ function App() {
             <NavigationBar userInfo={userInfo} logout={signOut} setLoading={setLoading}/>
 
             <div className="flex grow items-center justify-center p-4
-                             bg-indigo-950 bg-[url('public/grit.png')]">
+                             bg-indigo-900 bg-[url('public/grit.png')]">
             <Routes>
                 <Route 
                 path="/login"

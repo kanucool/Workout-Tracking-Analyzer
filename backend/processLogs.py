@@ -33,12 +33,10 @@ class LogProcessor:
                 
                 if len(self.reqs) < constants.RATE_LIMIT:
                     self.reqs.append(curr_time)
-                    break
+                    return CLIENT.models.generate_content(
+                        **kwargs,
+                    )
             time.sleep(1)
-
-        return CLIENT.models.generate_content(
-                **kwargs,
-            )
 
     def parse_workout_chunk(self, workouts: list[str]) -> Optional[models.WorkoutLog]:
         try:
@@ -97,19 +95,24 @@ class LogProcessor:
 
         return parsed_workouts
 
+    def read_pdf(self, pdf_bytes: bytes):
+        pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
+        file_content = '\n'.join(filter(lambda page: page,
+                                    (
+                                        page.extract_text()
+                                        for page
+                                        in pdf_reader.pages
+                                    )
+                                )
+                            )
+        return file_content
 
     async def extract_text_from_file(self, workout_log_file: UploadFile, filename: str,) -> str:
         if filename.endswith(".pdf"):
             pdf_bytes = await workout_log_file.read()
-            pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
-            file_content = '\n'.join(filter(lambda page: page,
-                                        (
-                                            page.extract_text()
-                                            for page
-                                            in pdf_reader.pages
-                                        )
-                                    )
-                                )
+            file_content = await(self.make_thread(self.read_pdf,
+                                    pdf_bytes=pdf_bytes))
+            
         elif filename.endswith(".txt"):
             file_bytes = await workout_log_file.read()
             try:

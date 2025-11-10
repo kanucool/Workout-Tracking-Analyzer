@@ -35,7 +35,7 @@ export default function UploadWorkoutForm({ userInfo }) {
                 const formData = new FormData();
                 formData.append("workout_log_file", file);
 
-                const response = await fetch(import.meta.env.VITE_BACKEND_UPLOAD_API_ENDPOINT,
+                const response = await fetch(import.meta.env.VITE_BACKEND_API + "/parse/upload",
                     {
                         "method": "POST",
                         "headers": {
