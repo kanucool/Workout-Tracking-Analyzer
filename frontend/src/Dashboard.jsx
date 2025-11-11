@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 
-import UploadWorkoutForm from "./UploadWorkoutForm.jsx";
+import UploadWorkoutForm from "./components/UploadWorkoutForm.jsx";
 import LoadingOverlay from './components/LoadingOverlay.jsx';
+import WorkoutAnalytics from './components/WorkoutAnalytics.jsx';
 
 export default function Dashboard({ userInfo }) {
     const [loading, setLoading] = useState(false);
@@ -44,16 +45,19 @@ export default function Dashboard({ userInfo }) {
     useEffect(() => {refresh()}, [userInfo]);
 
     return (
-    <div className="w-full max-w-lg overflow-hidden relative">
+    <div className="w-full max-w-lg overflow-hidden relative bg-white">
         <LoadingOverlay loading={loading}/>
-        <div className="flex flex-wrap max-w-lg text-white gap-2">
+        <WorkoutAnalytics workoutData={workoutData}/>
+        {/*
+        <div className="flex flex-wrap max-w-lg gap-2">
             {workoutData.map((workout) => (
                 <div key={`workout-date-${workout.date}`}>{workout.date},</div>
             ))}
         </div>
+        */}
         {error}
         <UploadWorkoutForm userInfo={userInfo} setLoading={setLoading} />
-        <button className="default-button text-white" onClick={refresh}>Refresh</button>
+        <button className="default-button" onClick={refresh}>Refresh</button>
     </div>
     );
 }   

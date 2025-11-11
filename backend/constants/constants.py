@@ -1,6 +1,8 @@
+MEGA_CHUNK_SIZE = 20_000
+
 CHUNK_SIZE = 15
 
-THREAD_LIMIT = 15
+THREAD_LIMIT = 50
 
 RATE_LIMIT = 15
 
@@ -111,9 +113,8 @@ Example Output for above:
 --- RULES ---
 1.  **Parse all dated entries.** Convert dates from M/D/YYYY or MM/DD/YYYY to "YYYY-MM-DD".
 2.  **HANDLE JUNK LINES:** If a line of text appears that is NOT a date and NOT an exercise (e.g., "BACK IN COLLEGE", "24 Hour Fitness:", "Internship (limited equipment)", "---"), **make it a note for the next workout AND CONTINUE PARSING**.
-3.  **HANDLE NOTES:** If a note appears on the same line as a date or an exercise (e.g., "(Overall good workout)", "(Form needs improvement)"), log it as a note for that workout and remove it from the exercise name itself.
+3.  **HANDLE NOTES:** If a note appears on the same line as a date or attached to an exercise (e.g., "(Overall good workout)", "(Form needs improvement)"), log it as a note for that workout and remove it from the exercise name itself.
 4.  **HANDLE SETS:** Expand set notations (e.g., "3x12 170lb") into individual set objects (e.g., three objects with {"reps": 12, "weight": 170, "unit": "lb"}).
-5.  **HANDLE DATE ERRORS:** If a date's year seems chronologically impossible (e.g., '1/10/2023' appearing after '12/19/2023'), this is okay (the data can be potentially out of order).
 6.  **HANDLE SKIPPED EXERCISES:** If an exercise is marked as "(skipped)", do not include it in the "exercises" list.
 
 Now answer for the following workout log data:

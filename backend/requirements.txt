@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 pydantic
+levenshtein
 python-dotenv
 pypdf
 google-genai

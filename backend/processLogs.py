@@ -8,6 +8,7 @@ from itertools import zip_longest
 from collections import deque
 import asyncio
 from threading import Lock
+from Levenshtein import distance
 import time
 
 import models
@@ -33,13 +34,18 @@ class LogProcessor:
                 
                 if len(self.reqs) < constants.RATE_LIMIT:
                     self.reqs.append(curr_time)
-                    return CLIENT.models.generate_content(
+                    break
+                
+            time.sleep(1)
+        
+        return CLIENT.models.generate_content(
                         **kwargs,
                     )
-            time.sleep(1)
 
     def parse_workout_chunk(self, workouts: list[str]) -> Optional[models.WorkoutLog]:
         try:
+            start = time.time()
+
             response = self.request_gemini(model='gemini-2.5-flash-lite',
                 contents=f"{constants.WORKOUT_LOG_TO_STANDARDIZED_FORMAT_PROMPT}\n{'\n'.join(workouts)}",
                 config=types.GenerateContentConfig(
@@ -47,6 +53,8 @@ class LogProcessor:
                     response_schema=models.WorkoutLog,
                 ),)
             assert response and response.text
+            print(f"chunk processed in {time.time() - start}")
+
             return models.WorkoutLog.model_validate(json.loads(response.text))
 
         except Exception as e:
@@ -58,9 +66,30 @@ class LogProcessor:
             return await asyncio.to_thread(
                 target_func, **kwargs
             )
+        
+    def condense_workout_log(self, workout_log: models.WorkoutLog) -> models.WorkoutLog:
+        exercise_mapping = {}
+        workout_log = workout_log.model_copy(deep=True)
+
+        for workout in workout_log.workouts:
+            for exercise in workout.exercises:
+                standardized_name = ' '.join(sorted(exercise.name.lower().split()))
+                exercise.name = ' '.join(map(lambda word: word.strip("()").capitalize(),
+                                          exercise.name.lower().split()))
+
+                for prev_standardized, prev_name in exercise_mapping.items():
+                    if distance(standardized_name, prev_standardized) <= 2:
+                        exercise.name = prev_name
+                        break
+                else:
+                    exercise_mapping[standardized_name] = exercise.name
+        
+        return workout_log
 
     async def parse_workout_log(self, workout_log_text: str) -> models.WorkoutLog:
         start = time.time()
+        print("Starting log splitter query")
+
         response = await self.make_thread(
             self.request_gemini,
             model='gemini-2.5-flash-lite',
@@ -76,6 +105,7 @@ class LogProcessor:
 
         assert response and response.text
         workouts = models.WorkoutLogRawText.model_validate(json.loads(response.text))
+        print(f"Parsed {len(workouts.workouts)} workouts from log splitter query")
         
         parsing_tasks = [self.make_thread(self.parse_workout_chunk, workouts=list(chunk))
                         for chunk in zip_longest(
@@ -91,9 +121,9 @@ class LogProcessor:
             assert isinstance(workout_log_chunk, models.WorkoutLog)
             parsed_workouts.workouts.extend(workout_log_chunk.workouts)
         
-        print(f"Time to parse all workouts via multithreading is {time.time() - start}")
+        print(f"Time to parse workouts via multithreading is {time.time() - start}")
 
-        return parsed_workouts
+        return await self.make_thread(self.condense_workout_log, workout_log=parsed_workouts)
 
     def read_pdf(self, pdf_bytes: bytes):
         pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -124,7 +154,6 @@ class LogProcessor:
 
         return file_content
 
-
     async def parse_raw_data(self, workout_log_file: UploadFile = File(None),
                             workout_log_text: str = Form(None),) -> models.WorkoutLog:
         try:
@@ -133,10 +162,25 @@ class LogProcessor:
             
             if workout_log_file:
                 filename = (workout_log_file.filename or "invalid").lower()
-                return await self.parse_workout_log(await self.extract_text_from_file(
+                file_content = await self.extract_text_from_file(
                                             workout_log_file=workout_log_file,
-                                            filename=filename,),
-                                        )
+                                            filename=filename,)
+                
+                mega_chunks = [file_content[i:i + constants.MEGA_CHUNK_SIZE]
+                               for i in range(0, len(file_content), constants.MEGA_CHUNK_SIZE)]
+
+                parsing_tasks = [self.parse_workout_log(chunk) for chunk in mega_chunks]
+
+                parsed_chunks = filter(lambda workout_log: isinstance(workout_log, models.WorkoutLog),
+                                await asyncio.gather(*parsing_tasks),)
+        
+                parsed_workouts = models.WorkoutLog(workouts=[])
+                for workout_log_chunk in parsed_chunks:
+                    assert isinstance(workout_log_chunk, models.WorkoutLog)
+                    parsed_workouts.workouts.extend(workout_log_chunk.workouts)
+            
+                return await self.make_thread(self.condense_workout_log, workout_log=parsed_workouts)
+            
             elif workout_log_text:
                 return await self.parse_workout_log(workout_log_text=workout_log_text)
         except Exception as e:

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import LoadingOverlay from './components/LoadingOverlay.jsx';
+import LoadingOverlay from './LoadingOverlay.jsx';
 
 export default function UploadWorkoutForm({ userInfo }) {
     const [fileList, setFileList] = useState([]);
