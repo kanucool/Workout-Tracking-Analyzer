@@ -56,7 +56,7 @@ export default function WorkoutAnalytics({ workoutData } ) {
       <CartesianGrid />
       <Line dataKey="oneRepMax" />
       <XAxis dataKey="date" />
-      <YAxis />
+      <YAxis /> 
     </LineChart>
     <select name="exercises" onChange={(e) => {setCurrentExercise(e.target.value)}}>
         {uniqueExercises.map(exercise => {
